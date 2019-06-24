@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	oidc "github.com/coreos/go-oidc"
-	jwt "github.com/dgrijalva/jwt-go"
+	"github.com/coreos/go-oidc"
+	"github.com/dgrijalva/jwt-go"
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 )
@@ -57,7 +56,7 @@ func init() {
 	if string(redirURL[len(redirURL)-1]) == "/" {
 		redirURL = string(redirURL[:len(redirURL)-1])
 	}
-	redirURL = redirURL + "/login/oidc"
+	redirURL = redirURL + "/authservice/callback"
 
 	oauth2Config = oauth2.Config{
 		ClientID:     clientID,
@@ -84,7 +83,8 @@ type loginSession struct {
 	OrigURL  string
 }
 
-// OIDCHandler processes authn responses from OpenID Provider, exchanges token to userinfo and establishes user session with cookie containing JWT token
+// OIDCHandler processes authn responses from OpenID Provider,
+// exchanges token to userinfo and establishes user session with cookie containing JWT token.
 func OIDCHandler(w http.ResponseWriter, r *http.Request) {
 	var authCode = r.FormValue("code")
 	if len(authCode) == 0 {
@@ -149,22 +149,7 @@ func OIDCHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userInfo, err := oidcProvider.UserInfo(ctx, oauth2.StaticTokenSource(oauth2Token))
-	if err != nil {
-		log.Println("Problem fetching userinfo:", err.Error())
-		returnStatus(w, http.StatusInternalServerError, "Not able to fetch userinfo.")
-		return
-	}
-
-	claims := json.RawMessage{}
-	if err = userInfo.Claims(&claims); err != nil {
-		log.Println("Problem getting userinfo claims:", err.Error())
-		returnStatus(w, http.StatusInternalServerError, "Not able to fetch userinfo claims.")
-		return
-	}
-
-	userJwt := createSignedJWT(claims, idToken.Expiry)
-	cookie := createCookie(userJwt, idToken.Expiry, hostname)
+	cookie := createCookie(rawIDToken, idToken.Expiry, hostname)
 
 	// Removing OIDC flow state from DB
 	if redisdb != nil {
@@ -201,7 +186,7 @@ func beginOIDCLogin(w http.ResponseWriter, r *http.Request, origURL string) {
 func createCookie(sessionJwt string, expiration time.Time, domain string) *http.Cookie {
 
 	cookie := &http.Cookie{
-		Name:    "auth",
+		Name:    AuthCookie,
 		Value:   sessionJwt,
 		Path:    "/",
 		Domain:  domain,

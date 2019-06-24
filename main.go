@@ -71,9 +71,9 @@ func main() {
 
 	router := mux.NewRouter()
 	router.HandleFunc("/healthz", HealthHandler).Methods(http.MethodGet)
-	router.HandleFunc("/login/oidc", OIDCHandler).Methods(http.MethodGet)
-	router.HandleFunc("/login", LoginHandler).Methods(http.MethodGet)
-	router.HandleFunc("/logout", LogoutHandler).Methods(http.MethodGet)
+	router.HandleFunc("/authservice/callback", OIDCHandler).Methods(http.MethodGet)
+	//router.HandleFunc("/login", LoginHandler).Methods(http.MethodGet)
+	//router.HandleFunc("/logout", LogoutHandler).Methods(http.MethodGet)
 	router.PathPrefix("/").Handler(wh)
 
 	if redisdb != nil {

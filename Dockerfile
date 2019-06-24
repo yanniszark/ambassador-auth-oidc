@@ -6,14 +6,14 @@ ADD Gopkg.toml .
 ADD Gopkg.lock .
 RUN go get github.com/golang/dep/cmd/dep
 RUN dep ensure
-RUN go build -o /go/bin/ambassador-auth-oidc
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o /go/bin/ambassador-auth-oidc
 
-FROM alpine:3.8
+FROM debian:stable
 LABEL org.label-schema.vcs-url="https://github.com/ajmyyra/ambassador-auth-oidc"
 LABEL org.label-schema.version="1.3"
-RUN apk update && apk add ca-certificates && rm -rf /var/cache/apk/*
-RUN addgroup -S auth && adduser -S -G auth auth
+RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/cache/apk/*
+RUN addgroup --system auth && adduser --system --group auth
 USER auth
 WORKDIR /app
 COPY --from=builder /go/bin/ambassador-auth-oidc /app/
-ENTRYPOINT [ "./ambassador-auth-oidc" ]
+ENTRYPOINT [ "/app/ambassador-auth-oidc" ]

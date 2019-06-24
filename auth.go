@@ -16,9 +16,15 @@ import (
 	"github.com/go-redis/redis"
 )
 
+const (
+	AuthCookie = "id_token"
+)
+
 var hostname string
 
 var redisdb *redis.Client
+
+var addGoogleAuthHeaders string
 
 var logoutCookie = false
 
@@ -32,6 +38,8 @@ type blacklistItem struct {
 }
 
 func init() {
+	addGoogleAuthHeaders = getenvOrDefault("ADD_GOOGLE_AUTH_HEADERS", "")
+
 	redisAddr := getenvOrDefault("REDIS_ADDRESS", "")
 	redisPwd := getenvOrDefault("REDIS_PASSWORD", "")
 
@@ -83,36 +91,48 @@ func newWildcardHandler() *wildcardHandler {
 
 // AuthReqHandler processes all incoming requests by default, unless specific endpoint is mentioned
 func AuthReqHandler(w http.ResponseWriter, r *http.Request) {
-	var userToken string
+	var rawIDToken string
+
+	deletionCookie := &http.Cookie{
+		Name:     AuthCookie,
+		Value:    "",
+		Domain:   hostname,
+		Path: "/",
+		MaxAge:   0,
+		HttpOnly: true,
+	}
 
 	if len(whitelist[0]) > 0 {
 		for _, v := range whitelist {
 			if strings.HasPrefix(r.URL.String(), string(v)) {
 				log.Println(getUserIP(r), r.URL.String(), "URI is whitelisted. Accepted without authorization.")
-				returnStatus(w, http.StatusOK, "OK")
+				http.SetCookie(w, deletionCookie)
+				beginOIDCLogin(w, r, r.URL.Path)
 				return
 			}
 		}
 	}
 	if len(r.Header.Get("X-Auth-Token")) != 0 { // Header available in request
-		userToken = r.Header.Get("X-Auth-Token")
+		rawIDToken = r.Header.Get("X-Auth-Token")
 	} else {
-		cookie, err := r.Cookie("auth")
+		cookie, err := r.Cookie(AuthCookie)
 		if err != nil {
 			log.Println(getUserIP(r), r.URL.String(), "Cookie not set, redirecting to login.")
 			beginOIDCLogin(w, r, r.URL.Path)
 			return
 		}
-		userToken = cookie.Value
+		rawIDToken = cookie.Value
 	}
 
-	if len(userToken) == 0 { // Cookie or auth header empty
+	if len(rawIDToken) == 0 { // Cookie or auth header empty
 		log.Println(getUserIP(r), r.URL.String(), "Empty authorization header.")
-		returnStatus(w, http.StatusBadRequest, "Cookie/header empty or malformed.")
+
 		return
 	}
 
-	token, err := parseJWT(userToken)
+	// Verifying received ID token
+	verifier := oidcProvider.Verifier(oidcConfig)
+	idToken, err := verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		if err.Error() == "Token is expired" {
 			w.Header().Set("X-Unauthorized-Reason", "Token Expired")
@@ -121,31 +141,39 @@ func AuthReqHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println(getUserIP(r), r.URL.String(), "Problem validating JWT:", err.Error())
 		}
 
-		returnStatus(w, http.StatusUnauthorized, "Cookie/header expired or malformed.")
+
+		http.SetCookie(w, deletionCookie)
+
+		beginOIDCLogin(w, r, r.URL.Path)
 		return
 	}
 
-	if checkBlacklist(hashString(token.Raw)) {
+	if checkBlacklist(hashString(rawIDToken)) {
 		log.Println(getUserIP(r), r.URL.String(), "Token in blacklist.")
 		returnStatus(w, http.StatusUnauthorized, "Not logged in")
 		return
 	}
 
-	uifClaim, err := base64decode(token.Claims.(jwt.MapClaims)["uif"].(string))
-	if err != nil {
-		log.Println(getUserIP(r), r.URL.String(), "Not able to decode base64 content:", err.Error())
-		returnStatus(w, http.StatusBadRequest, "Malformed cookie or header.")
-		return
+	log.Println(getUserIP(r), r.URL.String(), "Authorized & accepted.")
+
+	// Add Google Header if specified
+	if addGoogleAuthHeaders == "on" {
+		var claims struct {
+			Email         string `json:"email"`
+		}
+		if err := idToken.Claims(&claims); err != nil {
+			log.Println("Error trying to unmarshal jwt claims: %v", err)
+			returnStatus(w, http.StatusInternalServerError, "Unable to unmarshal jwt claims.")
+		}
+		w.Header().Set("X-Goog-Authenticated-User-Email", "accounts.google.com:" + claims.Email)
 	}
 
-	log.Println(getUserIP(r), r.URL.String(), "Authorized & accepted.")
-	w.Header().Set("X-Auth-Userinfo", string(uifClaim[:]))
 	returnStatus(w, http.StatusOK, "OK")
 }
 
 // LogoutHandler blacklists user token
 func LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("auth")
+	cookie, err := r.Cookie(AuthCookie)
 	if err != nil {
 		log.Println(getUserIP(r), r.URL.String(), "Cookie not set, not able to logout.")
 		returnStatus(w, http.StatusBadRequest, "Cookie not set.")
