@@ -112,9 +112,12 @@ func AuthReqHandler(w http.ResponseWriter, r *http.Request) {
 		userToken = cookie.Value
 	}
 
+	deletionCookie := createCookie("", time.Now().AddDate(0, 0, -2), hostname)
+
 	if len(userToken) == 0 { // Cookie or auth header empty
 		log.Println(getUserIP(r), r.URL.String(), "Empty authorization header.")
-		returnStatus(w, http.StatusBadRequest, "Cookie/header empty or malformed.")
+		http.SetCookie(w, deletionCookie)
+		beginOIDCLogin(w, r, r.URL.Path)
 		return
 	}
 
@@ -127,20 +130,24 @@ func AuthReqHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println(getUserIP(r), r.URL.String(), "Problem validating JWT:", err.Error())
 		}
 
+		http.SetCookie(w, deletionCookie)
+		beginOIDCLogin(w, r, r.URL.Path)
 		returnStatus(w, http.StatusUnauthorized, "Cookie/header expired or malformed.")
 		return
 	}
 
 	if checkBlacklist(hashString(token.Raw)) {
 		log.Println(getUserIP(r), r.URL.String(), "Token in blacklist.")
-		returnStatus(w, http.StatusUnauthorized, "Not logged in")
+		http.SetCookie(w, deletionCookie)
+		beginOIDCLogin(w, r, r.URL.Path)
 		return
 	}
 
 	uifClaim, err := base64decode(token.Claims.(jwt.MapClaims)["uif"].(string))
 	if err != nil {
 		log.Println(getUserIP(r), r.URL.String(), "Not able to decode base64 content:", err.Error())
-		returnStatus(w, http.StatusBadRequest, "Malformed cookie or header.")
+		http.SetCookie(w, deletionCookie)
+		beginOIDCLogin(w, r, r.URL.Path)
 		return
 	}
 
