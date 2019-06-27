@@ -30,6 +30,7 @@ Following environment variables are used by the software.
 + **SKIP_AUTH_URI** Space separated whitelist of URIs like "/info /health" to bypass authorization. Contains nothing by default.
 + **REDIS_ADDRESS** Address for your Redis instance, IP or hostname. Required for communication of setups containing more than one AuthService.
 + **REDIS_PASSWORD** Password for your Redis service, if needed.
++ **OIDC_PROVIDER_CA_FILE** If the OIDC provider uses self-signed certificates, use this option to the self-signed 
 
 ## Usage
 

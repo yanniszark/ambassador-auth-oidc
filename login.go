@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
@@ -35,6 +38,39 @@ func init() {
 	clientSecret := parseEnvVar("CLIENT_SECRET")
 
 	ctx = context.Background()
+
+	oidcProviderCAFile := os.Getenv("OIDC_PROVIDER_CA_FILE")
+	if oidcProviderCAFile != "" {
+
+		log.Printf("Adding custom CA from %s", oidcProviderCAFile)
+		// Get the SystemCertPool, continue with an empty pool on error
+		rootCAs, err := x509.SystemCertPool()
+		if err != nil {
+			log.Printf("Error trying to get system certs: %v", err)
+			rootCAs = x509.NewCertPool()
+		}
+
+		// Read in the cert file
+		certs, err := ioutil.ReadFile(oidcProviderCAFile)
+		if err != nil {
+			log.Fatalf("Failed to append %q to RootCAs: %v", oidcProviderCAFile, err)
+		}
+
+		// Append our cert to the system pool
+		if ok := rootCAs.AppendCertsFromPEM(certs); !ok {
+			log.Println("No certs appended, using system certs only")
+		}
+
+		client := &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					RootCAs: rootCAs,
+				},
+			},
+		}
+
+		ctx = oidc.ClientContext(ctx, client)
+	}
 
 	provider, err := oidc.NewProvider(ctx, parseEnvURL("OIDC_PROVIDER").String())
 	if err != nil {
