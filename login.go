@@ -72,9 +72,16 @@ func init() {
 		ctx = oidc.ClientContext(ctx, client)
 	}
 
-	provider, err := oidc.NewProvider(ctx, parseEnvURL("OIDC_PROVIDER").String())
-	if err != nil {
-		log.Fatal("OIDC provider setup failed: ", err)
+	var provider *oidc.Provider
+	var err error
+	for {
+		provider, err = oidc.NewProvider(ctx, parseEnvURL("OIDC_PROVIDER").String())
+		if err == nil {
+			break
+		}
+		log.Printf("OIDC provider setup failed: ", err)
+		log.Println("Retrying in 10 seconds...")
+		time.Sleep(10 * time.Second)
 	}
 
 	oidcConfig = &oidc.Config{
