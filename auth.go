@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -22,6 +23,8 @@ var redisdb *redis.Client
 
 var logoutCookie = false
 var disableUserInfo = false
+var userIDHeader string
+var userIDPrefix string
 
 var whitelist []string
 var blacklist []string // TODO Refactor to struct with expiration time, and add cleaner.
@@ -68,6 +71,11 @@ func init() {
 	if envContent == "true" {
 		disableUserInfo = true
 	}
+
+	userIDHeader = getenvOrDefault("USERID_HEADER", "x-goog-authenticated-user-email")
+	userIDPrefix = getenvOrDefault("USERID_PREFIX", "accounts.google.com:")
+	log.Printf("Using UserID Header: %s", userIDHeader)
+	log.Printf("Using UserID Prefix: %s", userIDPrefix)
 }
 
 // LoginHandler processes login requests
@@ -132,7 +140,6 @@ func AuthReqHandler(w http.ResponseWriter, r *http.Request) {
 
 		http.SetCookie(w, deletionCookie)
 		beginOIDCLogin(w, r, r.URL.Path)
-		returnStatus(w, http.StatusUnauthorized, "Cookie/header expired or malformed.")
 		return
 	}
 
@@ -151,8 +158,20 @@ func AuthReqHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims := struct {
+		Email string `json:"email"`
+	}{}
+	log.Printf("Unmarshalled to: %+v", claims)
+	if err := json.Unmarshal(uifClaim, &claims); err != nil {
+		log.Println("Error unmarshaling claims: %v", err)
+		returnStatus(w, http.StatusInternalServerError, "error unmarshaling user claims")
+	}
+
 	log.Println(getUserIP(r), r.URL.String(), "Authorized & accepted.")
-	w.Header().Set("X-Auth-Userinfo", string(uifClaim[:]))
+
+	userID := fmt.Sprintf("%s%s", userIDPrefix, claims.Email)
+	log.Printf("Adding header: %s = %s", userIDHeader, userID)
+	w.Header().Set(userIDHeader, userID)
 	returnStatus(w, http.StatusOK, "OK")
 }
 
